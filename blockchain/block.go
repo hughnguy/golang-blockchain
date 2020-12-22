@@ -2,19 +2,33 @@ package blockchain
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/gob"
 	"log"
 )
 
 type Block struct {
 	Hash []byte // current hash
-	Data []byte // data on block
+	Transactions []*Transaction // transactions on block. needs to have at least 1 transaction. can have many different transactions as well
 	PrevHash []byte // last blocks hash
 	Nonce int
 }
 
-func CreateBlock(data string, prevHash []byte) *Block {
-	block := &Block{[]byte{}, []byte(data), prevHash, 0} // returns memory address of this block
+// proof of work algorithm must consider transactions stored in block, instead of just hashing the previous data field
+func (b *Block) HashTransactions() []byte {
+	var txHashes [][]byte
+	var txHash [32]byte
+
+	for _, tx := range b.Transactions { // iterate through all transactions and append to 2d slice of bytes
+		txHashes = append(txHashes, tx.ID)
+	}
+	txHash = sha256.Sum256(bytes.Join(txHashes, []byte{})) // concatenate and hash the bytes
+
+	return txHash[:]
+}
+
+func CreateBlock(txs []*Transaction, prevHash []byte) *Block {
+	block := &Block{[]byte{}, txs, prevHash, 0} // returns memory address of this block
 
 	pow := NewProof(block) // create proof of work for this block
 	nonce, hash := pow.Run() // try to solve the proof of work here
@@ -25,8 +39,8 @@ func CreateBlock(data string, prevHash []byte) *Block {
 	return block
 }
 
-func Genesis() *Block { // first block in blockchain
-	return CreateBlock("Genesis", []byte{})
+func Genesis(coinbase *Transaction) *Block { // first block in blockchain
+	return CreateBlock([]*Transaction{coinbase}, []byte{})
 }
 
 // serialize for database storage
