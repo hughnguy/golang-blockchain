@@ -53,7 +53,7 @@ func (pow *ProofOfWork) InitData(nonce int) []byte {
 }
 
 func (pow *ProofOfWork) Run() (int, []byte) {
-	var intHash big.Int
+	var integerOfHash big.Int
 	var hash [32]byte
 
 	nonce := 0
@@ -63,13 +63,13 @@ func (pow *ProofOfWork) Run() (int, []byte) {
 		// will create a hash containing x number of 0's at the beginning (depending on the difficulty)
 
 		data := pow.InitData(nonce) // Step 1,2,3 occurs here (create hash of block data and nonce)
-		hash := sha256.Sum256(data) // Step 3: hash is created here
+		hash = sha256.Sum256(data) // Step 3: hash is created here
 
 		fmt.Printf("\r%x", hash)
-		intHash.SetBytes(hash[:]) // convert hash into big int
+		integerOfHash.SetBytes(hash[:]) // convert hash into big int
 
-		if intHash.Cmp(pow.Target) == -1 { // compare hash with pow target
-			break // if intHash is smaller than pow target, the work has been solved
+		if integerOfHash.Cmp(pow.Target) == -1 { // compare hash with pow target
+			break // if integerOfHash is smaller than pow target, the work has been solved
 		} else {
 			nonce++
 		}
@@ -80,14 +80,14 @@ func (pow *ProofOfWork) Run() (int, []byte) {
 }
 
 func (pow *ProofOfWork) Validate() bool {
-	var intHash big.Int
+	var integerOfHash big.Int
 
 	data := pow.InitData(pow.Block.Nonce)
 
 	hash := sha256.Sum256(data) // convert data into hash
-	intHash.SetBytes(hash[:]) // convert hash into big int
+	integerOfHash.SetBytes(hash[:]) // convert hash into big int
 
-	return intHash.Cmp(pow.Target) == -1 // check if valid (valid when intHash is smaller than pow target)
+	return integerOfHash.Cmp(pow.Target) == -1 // check if valid (valid when integerOfHash is smaller than pow target)
 }
 
 func ToHex(num int64) []byte {

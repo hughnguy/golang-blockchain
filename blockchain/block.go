@@ -1,8 +1,10 @@
 package blockchain
 
-type BlockChain struct {
-	Blocks []*Block
-}
+import (
+	"bytes"
+	"encoding/gob"
+	"log"
+)
 
 type Block struct {
 	Hash []byte // current hash
@@ -17,22 +19,43 @@ func CreateBlock(data string, prevHash []byte) *Block {
 	pow := NewProof(block) // create proof of work for this block
 	nonce, hash := pow.Run() // try to solve the proof of work here
 
-	block.Hash = hash[:]
-	block.Nonce = nonce
+	block.Hash = hash[:] // set hash for the block
+	block.Nonce = nonce // set solved nonce for the block. to easily validate the block
 
 	return block
-}
-
-func (chain *BlockChain) AddBlock(data string) {
-	prevBlock := chain.Blocks[len(chain.Blocks) - 1] // gets previous block
-	newBlock := CreateBlock(data, prevBlock.Hash)
-	chain.Blocks = append(chain.Blocks, newBlock) // returns new value
 }
 
 func Genesis() *Block { // first block in blockchain
 	return CreateBlock("Genesis", []byte{})
 }
 
-func InitBlockChain() *BlockChain { // creates blockchain
-	return &BlockChain{[]*Block{Genesis()}}
+// serialize for database storage
+func (b *Block) Serialize() []byte {
+	var res bytes.Buffer
+	encoder := gob.NewEncoder(&res)
+
+	err := encoder.Encode(b)
+
+	Handle(err)
+
+	return res.Bytes()
+}
+
+// deserialize when grabbing bytes from database
+func Deserialize(data []byte) *Block {
+	var block Block
+
+	decoder := gob.NewDecoder(bytes.NewReader(data))
+
+	err := decoder.Decode(&block)
+
+	Handle(err)
+
+	return &block
+}
+
+func Handle(err error) {
+	if err != nil {
+		log.Panic(err)
+	}
 }
