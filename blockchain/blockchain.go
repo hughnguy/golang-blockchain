@@ -145,35 +145,55 @@ func (iter *BlockChainIterator) Next() *Block { // iterate backwards until reach
 }
 
 func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
+	// transactions which contain outputs that have not been used for another transactions inputs (a transaction that has your UTXOs)
 	var unspentTxs []Transaction
 
+	// contains a map of your transactions that have spent outputs (outputs used in another transactions inputs)
+	// key is transaction ID where outputs belong
+	// value is array of indexes for outputs
 	spentTXOs := make(map[string][]int) // map where keys are strings and value is array of ints
 
 	iter := chain.Iterator()
 
-	for {
+	for { // iterate through all blocks
 		block := iter.Next()
 
-		for _, tx := range block.Transactions { // iterate through all transactions on block
+		// iterate through all transactions on each block
+		for _, tx := range block.Transactions {
 			txID := hex.EncodeToString(tx.ID)
 
 		Outputs: // this is a label so that we can break/continue out of this outer loop and not the inner loop
-			for outIdx, out := range tx.Outputs { // iterate through all outputs of transaction
-				if spentTXOs[txID] != nil { // if transaction id is present in map
+			for outIdx, out := range tx.Outputs { // iterate through all outputs for each transaction
+				// outIdx is index of output in array
+
+				// if the transaction contains some of your spent outputs (spent output = output that ends up being in another input therefore spent??)
+				if spentTXOs[txID] != nil {
+
+					// then iterate through all your spent outputs
 					for _, spentOutIdx := range spentTXOs[txID] {
+						// if the current output (outIdx) is one of your spent outputs in this transaction, skip to next output.
+						// we only want to find outputs that have not been spent yet
 						if spentOutIdx == outIdx {
-							continue Outputs
+							continue Outputs // skip to next output
 						}
 					}
 				}
+				// otherwise, reaching here means this transaction's output has not been spent by you
+				// and if the output belongs to you and is one of your unspent ones, add transaction to array (since this transaction contains some of your UTXOs)
 				if out.CanBeUnlocked(address) {
 					unspentTxs = append(unspentTxs, *tx)
 				}
 			}
 			if tx.IsCoinbase() == false {
+				// go through all inputs for transaction
 				for _, in := range tx.Inputs {
+					// if this input belongs to this address, it means you sent money to someone.
+					// so this input was previously another transactions output, therefore the output is now spent
 					if in.CanUnlock(address) {
+						// get the ID of the previous transaction that this input was in (when it was an output)
 						inTxID := hex.EncodeToString(in.ID)
+						// add the output index (when the input was previously an output) to the map
+						// this marks your output as spent for that transaction
 						spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Out)
 					}
 				}
@@ -187,13 +207,14 @@ func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
 	return unspentTxs
 }
 
+// Unspent transaction outputs (adding up all of these will give the balance of wallet)
 func (chain *BlockChain) FindUTXO(address string) []TxOutput {
 	var UTXOs []TxOutput
 	unspentTransactions := chain.FindUnspentTransactions(address)
 
-	for _, tx := range unspentTransactions {
+	for _, tx := range unspentTransactions { // iterate through all the outputs for all unspent transactions
 		for _, out := range tx.Outputs {
-			if out.CanBeUnlocked(address) {
+			if out.CanBeUnlocked(address) { // check the Output belongs to the address (output is address where token is sent)
 				UTXOs = append(UTXOs, out)
 			}
 		}

@@ -22,7 +22,7 @@ type TxOutput struct { // outputs are indivisible, cannot reference part of an o
 
 type TxInput struct { // inputs are references to previous outputs
 	ID []byte // references the transaction that the output is inside of
-	Out int // index where output appears
+	Out int // an input was previously an output, therefore this Out variable is the index where the output previously appeared in the last transaction?
 	Sig string
 }
 

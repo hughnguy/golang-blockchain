@@ -55,6 +55,7 @@ func (cli *CommandLine) createBlockChain(address string) {
 	fmt.Println("Finished!")
 }
 
+// Balance is calculated by adding up all UTXOs (unspent transaction outputs)
 func (cli *CommandLine) getBalance(address string) {
 	chain := blockchain.ContinueBlockChain(address)
 	defer chain.Database.Close()
