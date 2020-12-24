@@ -163,7 +163,7 @@ func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
 			txID := hex.EncodeToString(tx.ID)
 
 		Outputs: // this is a label so that we can break/continue out of this outer loop and not the inner loop
-			for outIdx, out := range tx.Outputs { // iterate through all outputs for each transaction
+			for outIdx, out := range tx.Outputs { // iterate through all outputs of this transaction
 				// outIdx is index of output in array
 
 				// if the transaction contains some of your spent outputs (spent output = output that ends up being in another input therefore spent??)
@@ -184,8 +184,8 @@ func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
 					unspentTxs = append(unspentTxs, *tx)
 				}
 			}
+			// iterate through all inputs for this transaction
 			if tx.IsCoinbase() == false {
-				// go through all inputs for transaction
 				for _, in := range tx.Inputs {
 					// if this input belongs to this address, it means you sent money to someone.
 					// so this input was previously another transactions output, therefore the output is now spent
@@ -200,7 +200,7 @@ func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
 			}
 		}
 
-		if len(block.PrevHash) == 0 {
+		if len(block.PrevHash) == 0 { // break if on genesis block
 			break
 		}
 	}
@@ -210,6 +210,7 @@ func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
 // Unspent transaction outputs (adding up all of these will give the balance of wallet)
 func (chain *BlockChain) FindUTXO(address string) []TxOutput {
 	var UTXOs []TxOutput
+	// gets all transactions where the outputs are unspent (not used as inputs in other transactions)
 	unspentTransactions := chain.FindUnspentTransactions(address)
 
 	for _, tx := range unspentTransactions { // iterate through all the outputs for all unspent transactions
@@ -222,8 +223,11 @@ func (chain *BlockChain) FindUTXO(address string) []TxOutput {
 	return UTXOs
 }
 
+// finds unspent outputs that you can use for the specified amount
 func (chain *BlockChain) FindSpendableOutputs(address string, amount int) (int, map[string][]int) {
+	// contains unspent outputs for every transaction id (key)
 	unspentOutputs := make(map[string][]int)
+	// gets all transactions where the outputs are unspent (not used as inputs in other transactions)
 	unspentTxs := chain.FindUnspentTransactions(address)
 	accumulated := 0
 
@@ -231,11 +235,14 @@ func (chain *BlockChain) FindSpendableOutputs(address string, amount int) (int, 
 	for _, tx := range unspentTxs {
 		txID := hex.EncodeToString(tx.ID)
 
-		for outIdx, out := range tx.Outputs {
-			if out.CanBeUnlocked(address) && accumulated < amount { // cannot make transaction where user does not have enough tokens in account
+		for outIdx, out := range tx.Outputs { // iterate through unspent outputs
+
+			// if accumulated is less than specified amount, keep adding unspent outputs together
+			if out.CanBeUnlocked(address) && accumulated < amount {
 				accumulated += out.Value
 				unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
 
+				// break out once accumulated outputs is equal to or larger than specified amount
 				if accumulated >= amount {
 					break Work
 				}
