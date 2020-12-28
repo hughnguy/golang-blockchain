@@ -1,7 +1,10 @@
 package blockchain
 
 import (
+	"bytes"
+	"crypto/ecdsa"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"github.com/dgraph-io/badger"
 	"os"
@@ -144,7 +147,7 @@ func (iter *BlockChainIterator) Next() *Block { // iterate backwards until reach
 	return block
 }
 
-func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
+func (chain *BlockChain) FindUnspentTransactions(pubKeyHash []byte) []Transaction {
 	// transactions which contain outputs that have not been used for another transactions inputs (a transaction that has your UTXOs)
 	var unspentTxs []Transaction
 
@@ -178,18 +181,18 @@ func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
 						}
 					}
 				}
-				// otherwise, reaching here means this transaction's output has not been spent by you
-				// and if the output belongs to you and is one of your unspent ones, add transaction to array (since this transaction contains some of your UTXOs)
-				if out.CanBeUnlocked(address) {
+				// otherwise, reaching here means this transaction's output has not been spent yet
+				// and if the output was sent to you (locked with your address) and is one of your unspent ones, add transaction to array (since this transaction contains some of your UTXOs)
+				if out.IsLockedWithKey(pubKeyHash) {
 					unspentTxs = append(unspentTxs, *tx)
 				}
 			}
 			// iterate through all inputs for this transaction
 			if tx.IsCoinbase() == false {
 				for _, in := range tx.Inputs {
-					// if this input belongs to this address, it means you sent money to someone.
+					// if this input uses this public key hash, it means you sent money to someone (input has you as the sender)
 					// so this input was previously another transactions output, therefore the output is now spent
-					if in.CanUnlock(address) {
+					if in.UsesKey(pubKeyHash) {
 						// get the ID of the previous transaction that this input was in (when it was an output)
 						inTxID := hex.EncodeToString(in.ID)
 						// add the output index (when the input was previously an output) to the map
@@ -208,14 +211,15 @@ func (chain *BlockChain) FindUnspentTransactions(address string) []Transaction {
 }
 
 // Unspent transaction outputs (adding up all of these will give the balance of wallet)
-func (chain *BlockChain) FindUTXO(address string) []TxOutput {
+func (chain *BlockChain) FindUTXO(pubKeyHash []byte) []TxOutput {
 	var UTXOs []TxOutput
 	// gets all transactions where the outputs are unspent (not used as inputs in other transactions)
-	unspentTransactions := chain.FindUnspentTransactions(address)
+	unspentTransactions := chain.FindUnspentTransactions(pubKeyHash)
 
 	for _, tx := range unspentTransactions { // iterate through all the outputs for all unspent transactions
 		for _, out := range tx.Outputs {
-			if out.CanBeUnlocked(address) { // check the Output belongs to the address (output is address where token is sent)
+			// check the output was locked with this address (belongs to this receiver and can be unlocked by this address to use as new input)
+			if out.IsLockedWithKey(pubKeyHash) {
 				UTXOs = append(UTXOs, out)
 			}
 		}
@@ -224,11 +228,11 @@ func (chain *BlockChain) FindUTXO(address string) []TxOutput {
 }
 
 // finds unspent outputs that you can use for the specified amount
-func (chain *BlockChain) FindSpendableOutputs(address string, amount int) (int, map[string][]int) {
+func (chain *BlockChain) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[string][]int) {
 	// contains unspent outputs for every transaction id (key)
 	unspentOutputs := make(map[string][]int)
 	// gets all transactions where the outputs are unspent (not used as inputs in other transactions)
-	unspentTxs := chain.FindUnspentTransactions(address)
+	unspentTxs := chain.FindUnspentTransactions(pubKeyHash)
 	accumulated := 0
 
 	Work:
@@ -237,8 +241,9 @@ func (chain *BlockChain) FindSpendableOutputs(address string, amount int) (int, 
 
 		for outIdx, out := range tx.Outputs { // iterate through unspent outputs
 
+			// if output belongs to this public key hash and...
 			// if accumulated is less than specified amount, keep adding unspent outputs together
-			if out.CanBeUnlocked(address) && accumulated < amount {
+			if out.IsLockedWithKey(pubKeyHash) && accumulated < amount {
 				accumulated += out.Value
 				unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
 
@@ -251,4 +256,59 @@ func (chain *BlockChain) FindSpendableOutputs(address string, amount int) (int, 
 	}
 
 	return accumulated, unspentOutputs
+}
+
+// iterates through all blocks until finding a transaction with ID
+func (chain *BlockChain) FindTransaction(ID []byte) (Transaction, error) {
+	iter := chain.Iterator()
+
+	for {
+		block := iter.Next()
+
+		for _, tx := range block.Transactions {
+			if bytes.Compare(tx.ID, ID) == 0 {
+				return *tx, nil
+			}
+		}
+
+		if len(block.PrevHash) == 0 {
+			break
+		}
+	}
+	return Transaction{}, errors.New("Transaction does not exist!")
+}
+
+// In order to sign the transaction, we need to take all the previous outputs that
+// are being used as inputs for this transaction, and use the previous
+// outputs pubkeyhash (created by hashing the receiver's address)
+// to sign with our private key and create a digital signature which is attached to the new input as proof
+func (chain *BlockChain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey) {
+	prevTXs := make(map[string]Transaction)
+
+	for _, in := range tx.Inputs {
+		// get all the previous transactions where the inputs were previously outputs
+		// and add them to the map
+		prevTX, err := chain.FindTransaction(in.ID)
+		Handle(err)
+		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
+	}
+	// need to use the outputs in those previous transactions in order to sign the new
+	// inputs created in this current transaction
+	tx.Sign(privKey, prevTXs)
+}
+
+// In order to verify this current transaction, we need to check
+// all the previous outputs used for this transactions inputs, and verify
+// that these inputs were created from those outputs.
+// this is done by using the previous outputs pubkeyhash and verifying it with
+// the inputs public key + signature
+func (chain *BlockChain) VerifyTransaction(tx *Transaction) bool {
+	prevTXs := make(map[string]Transaction)
+
+	for _, in := range tx.Inputs {
+		prevTX, err := chain.FindTransaction(in.ID)
+		Handle(err)
+		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
+	}
+	return tx.Verify(prevTXs)
 }

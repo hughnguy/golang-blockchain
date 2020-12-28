@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"golang-blockchain/blockchain"
 	"golang-blockchain/wallet"
+	"log"
 	"os"
 	"runtime"
 	"strconv"
@@ -61,6 +62,10 @@ func (cli *CommandLine) printChain() {
 		fmt.Printf("Hash: %x\n", block.Hash)
 		pow := blockchain.NewProof(block) // validates block
 		fmt.Printf("PoW: %s\n", strconv.FormatBool(pow.Validate()))
+		for _, tx := range block.Transactions {
+			// printing the transaction calls the Transaction.String() method
+			fmt.Println(tx)
+		}
 		fmt.Println()
 
 		if len(block.PrevHash) == 0 { // genesis block has empty byte array as previous hash
@@ -70,6 +75,9 @@ func (cli *CommandLine) printChain() {
 }
 
 func (cli *CommandLine) createBlockChain(address string) {
+	if !wallet.ValidateAddress(address) {
+		log.Panic("Address is not valid")
+	}
 	chain := blockchain.InitBlockChain(address)
 	chain.Database.Close()
 	fmt.Println("Finished!")
@@ -77,11 +85,17 @@ func (cli *CommandLine) createBlockChain(address string) {
 
 // Balance is calculated by adding up all UTXOs (unspent transaction outputs)
 func (cli *CommandLine) getBalance(address string) {
+	if !wallet.ValidateAddress(address) {
+		log.Panic("Address is not valid")
+	}
+
 	chain := blockchain.ContinueBlockChain(address)
 	defer chain.Database.Close()
 
 	balance := 0
-	UTXOs := chain.FindUTXO(address)
+	pubKeyHash := wallet.Base58Decode([]byte(address))
+	pubKeyHash = pubKeyHash[1:len(pubKeyHash) - 4] // need to remove version and checksum from address to get public key hash
+	UTXOs := chain.FindUTXO(pubKeyHash)
 
 	for _, out := range UTXOs {
 		balance += out.Value
@@ -91,6 +105,12 @@ func (cli *CommandLine) getBalance(address string) {
 }
 
 func (cli *CommandLine) send(from, to string, amount int) {
+	if !wallet.ValidateAddress(to) {
+		log.Panic("Address is not valid")
+	}
+	if !wallet.ValidateAddress(from) {
+		log.Panic("Address is not valid")
+	}
 	chain := blockchain.ContinueBlockChain(from)
 	defer chain.Database.Close()
 
