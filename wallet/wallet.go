@@ -57,6 +57,7 @@ func (w Wallet) Address() []byte {
 }
 
 /*
+- Uses checksum part of address to ensure address is correct when typing it out
 - Validation is done by getting the actual checksum appended to the address,
 taking the data portion (version + public key hash), and running that through the
 original checksum generation function. You can then compare that generated target

@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"bytes"
+	"encoding/gob"
 	"golang-blockchain/wallet"
 )
 
@@ -10,10 +11,14 @@ type TxOutput struct { // outputs are indivisible, cannot reference part of an o
 	// This is a byte representation of your address (address is a hash of public key with checksum + version constant added to it)
 	// but with the checksum and version constant removed.
 	// generated when new output is created and locked with receiver's address.
-	// this pubkeyhash is later used when creating a signature for a new input. it has this hash attached to
-	// the input before hashing the transaction and signing with your private key.
+	// this pubkeyhash is later used when creating a signature for a new input. we temporarily attach this pubkeyhash to the pubkey field
+	// of the input before hashing the transaction and signing with your private key.
 	// the signature proves that the new input was previously created by this output (which is owned/locked by you)
 	PubKeyHash []byte
+}
+
+type TxOutputs struct {
+	Outputs []TxOutput
 }
 
 type TxInput struct { // inputs are references to previous outputs
@@ -24,7 +29,7 @@ type TxInput struct { // inputs are references to previous outputs
 	// the pubkey field is also used to help generate the signature
 	// this field is used to match up with a referenced output public key hash
 	// we temporarily attach the previous output's pubkeyhash field here before hashing and signing the entire transaction with a private key.
-	// the signature generated proves that this input was created by the same person who owned the previous output
+	// the signature generated proves that this input was created by the same address who owned and unlocked the previous output
 	PubKey []byte // normally this field would just contain the public key of the sender address
 }
 
@@ -35,6 +40,24 @@ func NewTxOutput(value int, address string) *TxOutput {
 	txo := &TxOutput{value, nil}
 	txo.Lock([]byte(address))
 	return txo
+}
+
+// converts all outputs into bytes
+func (outs TxOutputs) Serialize() []byte {
+	var buffer bytes.Buffer
+	encode := gob.NewEncoder(&buffer)
+	err := encode.Encode(outs)
+	Handle(err)
+	return buffer.Bytes()
+}
+
+// converts bytes back into outputs object
+func DeserializeOutputs(data []byte) TxOutputs {
+	var outputs TxOutputs
+	decode := gob.NewDecoder(bytes.NewReader(data))
+	err := decode.Decode(&outputs)
+	Handle(err)
+	return outputs
 }
 
 func (in *TxInput) UsesKey(pubKeyHash []byte) bool {

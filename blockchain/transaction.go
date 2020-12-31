@@ -73,7 +73,7 @@ func CoinbaseTx(to, data string) *Transaction {
 	return &tx
 }
 
-func NewTransaction(from, to string, amount int, chain *BlockChain) *Transaction {
+func NewTransaction(from, to string, amount int, UTXO *UTXOSet) *Transaction {
 	var inputs []TxInput
 	var outputs []TxOutput
 
@@ -85,7 +85,9 @@ func NewTransaction(from, to string, amount int, chain *BlockChain) *Transaction
 
 	// gets all outputs that are unspent, which can be spent for the specified amount
 	// accumulated amount can be larger than the specified amount since adding UTXOs which are not divisible
-	accumulated, validOutputs := chain.FindSpendableOutputs(pubKeyHash, amount)
+	accumulated, validOutputs := UTXO.FindSpendableOutputs(pubKeyHash, amount)
+	// old inefficient method (does not use DB)
+	// accumulated, validOutputs := chain.FindSpendableOutputs(pubKeyHash, amount)
 
 	if accumulated < amount {
 		log.Panic("Error: not enough funds")
@@ -118,7 +120,7 @@ func NewTransaction(from, to string, amount int, chain *BlockChain) *Transaction
 	tx.ID = tx.Hash()
 	// signing transaction with private key proves that the new inputs are created by
 	// previous outputs that are owned by you (only you can unlock)
-	chain.SignTransaction(&tx, w.PrivateKey)
+	UTXO.BlockChain.SignTransaction(&tx, w.PrivateKey)
 
 	return &tx
 }
@@ -143,7 +145,8 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTxs map[string]Transac
 		}
 	}
 
-	// clears the signature and public key in the inputs of this transaction before signing the transaction
+	// clears the signature and public key in the inputs of this transaction
+	// before hashing the transaction for the iterated input and signing that input
 	txCopy := tx.TrimmedCopy() // creates new copy, not a reference to old one
 
 	for inId, in := range txCopy.Inputs {
@@ -171,6 +174,8 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTxs map[string]Transac
 	}
 }
 
+// When verifying a transaction, we are taking the public key in the inputs, and checking
+// that they match with a referenced output that contains a hash of the public key inside of it
 func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 	if tx.IsCoinbase() {
 		return true // coinbase transaction is never signed
@@ -182,6 +187,8 @@ func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 		}
 	}
 
+	// clears the signature and public key in the inputs of this transaction
+	// before hashing the transaction for the iterated input
 	txCopy := tx.TrimmedCopy()
 	curve := elliptic.P256()
 
@@ -218,7 +225,7 @@ func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 		// after unpacking all the data from the signature of this current input and
 		// the public key hash of the previous output (which was locked with an address and
 		// got attached to this current input before hashing the entire transaction),
-		// running verify() here proves that this input was created from the same person
+		// running verify() here proves that this input was created and signed from the same person
 		// who owned the previous output (before being used in this input)
 		if ecdsa.Verify(&rawPubKey, txCopy.ID, &r, &s) == false {
 			return false

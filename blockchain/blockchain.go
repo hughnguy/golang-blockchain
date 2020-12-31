@@ -54,7 +54,7 @@ func InitBlockChain(address string) *BlockChain { // creates blockchain
 		// no blockchain created yet so create genesis block
 		cbtx := CoinbaseTx(address, genesisData) // address will be rewarded tokens
 		genesis := Genesis(cbtx)
-		fmt.Println("Genesis created")
+		fmt.Println("Genesis block created")
 		err = txn.Set(genesis.Hash, genesis.Serialize()) // set hash as key and serialized bytes as value
 		Handle(err)
 		err = txn.Set([]byte(lastHashKey), genesis.Hash) // keep track of last hash
@@ -98,7 +98,7 @@ func ContinueBlockChain(address string) *BlockChain {
 	return &chain
 }
 
-func (chain *BlockChain) AddBlock(transactions []*Transaction) {
+func (chain *BlockChain) AddBlock(transactions []*Transaction) *Block {
 	var lastHash []byte
 
 	err := chain.Database.View(func(txn *badger.Txn) error {
@@ -122,6 +122,8 @@ func (chain *BlockChain) AddBlock(transactions []*Transaction) {
 		return err
 	})
 	Handle(err)
+
+	return newBlock
 }
 
 func (chain *BlockChain) Iterator() *BlockChainIterator {
@@ -147,6 +149,7 @@ func (iter *BlockChainIterator) Next() *Block { // iterate backwards until reach
 	return block
 }
 
+// Gets unspent transactions for this particular public key hash
 func (chain *BlockChain) FindUnspentTransactions(pubKeyHash []byte) []Transaction {
 	// transactions which contain outputs that have not been used for another transactions inputs (a transaction that has your UTXOs)
 	var unspentTxs []Transaction
@@ -210,8 +213,72 @@ func (chain *BlockChain) FindUnspentTransactions(pubKeyHash []byte) []Transactio
 	return unspentTxs
 }
 
-// Unspent transaction outputs (adding up all of these will give the balance of wallet)
-func (chain *BlockChain) FindUTXO(pubKeyHash []byte) []TxOutput {
+// Gets ALL unspent transaction outputs (for the entire blockchain, not just yours)
+func (chain *BlockChain) FindUTXO() map[string]TxOutputs {
+	// unspent outputs that have not been used for another transaction's inputs
+	// key contains transaction ID that output belongs to
+	UTXO := make(map[string]TxOutputs)
+	// contains a map of any transactions that have spent outputs (outputs used in another transactions inputs)
+	// key is transaction ID where outputs belong
+	// value is array of indexes for outputs
+	spentTXOs := make(map[string][]int)
+
+	iter := chain.Iterator()
+
+	for { // iterate through all blocks
+		block := iter.Next()
+
+		// iterate through all transactions on each block
+		for _, tx := range block.Transactions {
+			txID := hex.EncodeToString(tx.ID)
+
+		Outputs:
+			for outIdx, out := range tx.Outputs { // iterate through all outputs of this transaction
+				// outIdx is index of output in array
+
+				// if the transaction contains some spent outputs (spent output = output that ends up being in another input therefore spent??)
+				if spentTXOs[txID] != nil {
+
+					// then iterate through all these spent outputs
+					for _, spentOutIdx := range spentTXOs[txID] {
+						// if the current output (outIdx) is a spent output in this transaction, skip to next output.
+						// we only want to find outputs that have not been spent yet
+						if spentOutIdx == outIdx {
+							continue Outputs // skip to next output
+						}
+					}
+				}
+				// otherwise, reaching here means this transaction's output has not been spent yet
+				// get all the unspent outputs for this transaction
+				outs := UTXO[txID]
+				// add the current output to the outputs array
+				outs.Outputs = append(outs.Outputs, out)
+				// set outputs array back to the unspent outputs map
+				UTXO[txID] = outs
+			}
+
+			// iterate through all inputs for this transaction
+			if tx.IsCoinbase() == false {
+				for _, in := range tx.Inputs {
+					// get the ID of the previous transaction that this input was in (when it was an output)
+					inTxID := hex.EncodeToString(in.ID)
+					// add the output index (when the input was previously an output) to the map
+					// this marks the output as spent for that transaction
+					spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Out)
+				}
+			}
+		}
+
+		if len(block.PrevHash) == 0 { // break if on genesis block
+			break
+		}
+	}
+	return UTXO
+}
+
+// OLD METHOD THAT DOESNT USE PERSISTENCE LAYER DB FOR UTXOs. NOT USED ANYMORE!
+// Unspent transaction outputs for this particular pub key hash (adding up all of these will give the balance of wallet)
+func (chain *BlockChain) FindUTXOForPubKeyHash(pubKeyHash []byte) []TxOutput {
 	var UTXOs []TxOutput
 	// gets all transactions where the outputs are unspent (not used as inputs in other transactions)
 	unspentTransactions := chain.FindUnspentTransactions(pubKeyHash)
@@ -227,6 +294,7 @@ func (chain *BlockChain) FindUTXO(pubKeyHash []byte) []TxOutput {
 	return UTXOs
 }
 
+// OLD METHOD THAT DOESNT USE PERSISTENCE LAYER DB FOR UTXOs. NOT USED ANYMORE!
 // finds unspent outputs that you can use for the specified amount
 func (chain *BlockChain) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[string][]int) {
 	// contains unspent outputs for every transaction id (key)
@@ -235,7 +303,7 @@ func (chain *BlockChain) FindSpendableOutputs(pubKeyHash []byte, amount int) (in
 	unspentTxs := chain.FindUnspentTransactions(pubKeyHash)
 	accumulated := 0
 
-	Work:
+Work:
 	for _, tx := range unspentTxs {
 		txID := hex.EncodeToString(tx.ID)
 
@@ -302,6 +370,7 @@ func (chain *BlockChain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateK
 // that these inputs were created from those outputs.
 // this is done by using the previous outputs pubkeyhash and verifying it with
 // the inputs public key + signature
+// Note: anyone can verify a transaction, but only the sender of a transaction can sign it to prove the transaction is legitimate
 func (chain *BlockChain) VerifyTransaction(tx *Transaction) bool {
 	prevTXs := make(map[string]Transaction)
 
