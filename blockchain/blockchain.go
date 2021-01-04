@@ -214,7 +214,7 @@ func (chain *BlockChain) FindUnspentTransactions(pubKeyHash []byte) []Transactio
 }
 
 // Gets ALL unspent transaction outputs (for the entire blockchain, not just yours)
-func (chain *BlockChain) FindUTXO() map[string]TxOutputs {
+func (chain *BlockChain) FindAllUTXOs() map[string]TxOutputs {
 	// unspent outputs that have not been used for another transaction's inputs
 	// key contains transaction ID that output belongs to
 	UTXO := make(map[string]TxOutputs)
@@ -278,7 +278,7 @@ func (chain *BlockChain) FindUTXO() map[string]TxOutputs {
 
 // OLD METHOD THAT DOESNT USE PERSISTENCE LAYER DB FOR UTXOs. NOT USED ANYMORE!
 // Unspent transaction outputs for this particular pub key hash (adding up all of these will give the balance of wallet)
-func (chain *BlockChain) FindUTXOForPubKeyHash(pubKeyHash []byte) []TxOutput {
+func (chain *BlockChain) FindUnspentTransactionOutputs(pubKeyHash []byte) []TxOutput {
 	var UTXOs []TxOutput
 	// gets all transactions where the outputs are unspent (not used as inputs in other transactions)
 	unspentTransactions := chain.FindUnspentTransactions(pubKeyHash)

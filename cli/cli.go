@@ -113,7 +113,7 @@ func (cli *CommandLine) getBalance(address string) {
 	balance := 0
 	pubKeyHash := wallet.Base58Decode([]byte(address))
 	pubKeyHash = pubKeyHash[1:len(pubKeyHash) - 4] // need to remove version and checksum from address to get public key hash
-	UTXOs := UTXOSet.FindUnspentTransactions(pubKeyHash)
+	UTXOs := UTXOSet.FindUnspentTransactionOutputs(pubKeyHash)
 
 	// old inefficient method (does not use DB)
 	//UTXOs := chain.FindUTXOForPubKeyHash(pubKeyHash)

@@ -16,7 +16,7 @@ type UTXOSet struct {
 	BlockChain *BlockChain
 }
 
-// finds unspent outputs that you can use for the specified amount
+// finds unspent outputs that you can use for the specified amount (for this public key hash)
 func (u UTXOSet) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[string][]int) {
 	// contains unspent outputs for every transaction id (key)
 	unspentOutputs := make(map[string][]int)
@@ -59,7 +59,7 @@ func (u UTXOSet) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[s
 }
 
 // Unspent transaction outputs for this particular pub key hash (adding up all of these will give the balance of wallet)
-func (u UTXOSet) FindUnspentTransactions(pubKeyHash []byte) []TxOutput {
+func (u UTXOSet) FindUnspentTransactionOutputs(pubKeyHash []byte) []TxOutput {
 	var UTXOs []TxOutput
 
 	db := u.BlockChain.Database
@@ -97,7 +97,7 @@ func (u UTXOSet) Reindex() {
 
 	u.DeleteByPrefix(utxoPrefix) // clears everything in database with this prefix
 
-	UTXO := u.BlockChain.FindUTXO() // gets all UTXOs in the blockchain
+	UTXO := u.BlockChain.FindAllUTXOs() // gets all UTXOs in the blockchain
 
 	err := db.Update(func(txn *badger.Txn) error {
 		for txId, outs := range UTXO { // iterate transaction IDS in UTXO map
