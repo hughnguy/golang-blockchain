@@ -2,7 +2,6 @@ package blockchain
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/gob"
 	"log"
 )
@@ -17,14 +16,15 @@ type Block struct {
 // proof of work algorithm must consider transactions stored in block, instead of just hashing the previous data field
 func (b *Block) HashTransactions() []byte {
 	var txHashes [][]byte
-	var txHash [32]byte
 
 	for _, tx := range b.Transactions { // iterate through all transactions and append to 2d slice of bytes
-		txHashes = append(txHashes, tx.ID)
+		txHashes = append(txHashes, tx.Serialize())
 	}
-	txHash = sha256.Sum256(bytes.Join(txHashes, []byte{})) // concatenate and hash the bytes
+	// generate a merkle tree using all transactions on this block. this can be used to quickly detect if a transaction belongs to a block??
+	tree := NewMerkleTree(txHashes)
 
-	return txHash[:]
+	// returns the merkle root
+	return tree.RootNode.Data
 }
 
 func CreateBlock(txs []*Transaction, prevHash []byte) *Block {

@@ -372,6 +372,11 @@ func (chain *BlockChain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateK
 // the inputs public key + signature
 // Note: anyone can verify a transaction, but only the sender of a transaction can sign it to prove the transaction is legitimate
 func (chain *BlockChain) VerifyTransaction(tx *Transaction) bool {
+	// coinbase transaction has no inputs, so always return true
+	if tx.IsCoinbase() {
+		return true
+	}
+
 	prevTXs := make(map[string]Transaction)
 
 	for _, in := range tx.Inputs {

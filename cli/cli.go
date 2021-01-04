@@ -90,7 +90,7 @@ func (cli *CommandLine) createBlockChain(address string) {
 		log.Panic("Address is not valid")
 	}
 	chain := blockchain.InitBlockChain(address)
-	chain.Database.Close()
+	defer chain.Database.Close()
 
 	// update UTXO set so that reward for genesis block appears in database
 	// can also run UTXO.update() instead inside of blockchain.InitBlockChain()???
@@ -137,7 +137,11 @@ func (cli *CommandLine) send(from, to string, amount int) {
 	defer chain.Database.Close()
 
 	tx := blockchain.NewTransaction(from, to, amount, &UTXOSet)
-	block := chain.AddBlock([]*blockchain.Transaction{tx})
+
+	// create the coinbase transaction here as well since this sender is also mining the block
+	cbTx := blockchain.CoinbaseTx(from, "")
+
+	block := chain.AddBlock([]*blockchain.Transaction{cbTx, tx}) // add coinbase transaction to block as well
 
 	// updates the UTXO database after creating new block
 	UTXOSet.Update(block)

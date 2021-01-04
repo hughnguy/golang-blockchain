@@ -45,30 +45,23 @@ func (tx *Transaction) Hash() []byte {
 	return hash[:]
 }
 
-// create hash ID from transaction
-func (tx *Transaction) SetID() {
-	var encoded bytes.Buffer
-	var hash [32]byte
-
-	encode := gob.NewEncoder(&encoded)
-	err := encode.Encode(tx)
-	Handle(err)
-
-	hash = sha256.Sum256(encoded.Bytes()) // hash the encoded transaction
-	tx.ID = hash[:]
-}
-
 // generation transaction which has no parent inputs and creates new coins from nothing (only has outputs)
 // coinbase can contain any arbitrary data
 func CoinbaseTx(to, data string) *Transaction {
+	// creates random generated data
 	if data == "" {
-		data = fmt.Sprintf("Coins to %s", to)
+		randData := make([]byte, 24)
+		_, err := rand.Read(randData)
+		if err != nil {
+			log.Panic(err)
+		}
+		data = fmt.Sprintf("%x", randData)
 	}
 	txin := TxInput{[]byte{}, -1, nil, []byte(data)} // references no output so empty byte array and negative index for Out variable
-	txout := NewTxOutput(100, to) // reward is 100
+	txout := NewTxOutput(20, to) // reward is 20 tokens
 
 	tx := Transaction{nil, []TxInput{txin}, []TxOutput{*txout}}
-	tx.SetID() // creates hash id for this transaction
+	tx.ID = tx.Hash() // creates hash id for this transaction
 
 	return &tx
 }
