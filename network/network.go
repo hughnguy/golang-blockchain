@@ -3,6 +3,7 @@ package network
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/hex"
 	"fmt"
 	"golang-blockchain/blockchain"
 	"gopkg.in/vrecan/death.v3"
@@ -39,11 +40,12 @@ var (
 	minerAddress string // node address for node that is acting as miner
 	KnownNodes = []string{"localhost:3000"} // main/central node is added by default
 	blocksInTransit = [][]byte{}
+	// pool of transactions
 	memoryPool = make(map[string]blockchain.Transaction) // key is the transaction ID
 )
 
 type Addr struct {
-	AddrList []string // list of addresses connected to each node. allows us to discover nodes connected to other peers
+	AddrList []string // list of addresses for each node. allows us to discover nodes connected to other peers
 }
 
 type Block struct {
@@ -107,6 +109,14 @@ func BytesToCmd(bytes []byte) string {
 	return fmt.Sprintf("%s", cmd)
 }
 
+// iterates through all known nodes of this client, and requests each of the
+// nodes to send the blocks on their blockchain
+func RequestBlocks() {
+	for _, node := range KnownNodes {
+		SendGetBlocks(node)
+	}
+}
+
 func ExtractCmd(request []byte) []byte {
 	return request[:commandLength]
 }
@@ -131,7 +141,8 @@ func SendBlock(addr string, b *blockchain.Block) {
 	SendData(addr, request)
 }
 
-// sends inventory to the node with address
+// prompts the node at address that they need to update their inventory with this block or transaction.
+// the other nodes will then set the inventory as pending delivery, and request the full data of that block or transaction to be sent back
 func SendInv(address, kind string, items [][]byte) {
 	inventory := Inv{nodeAddress, kind, items}
 	payload := GobEncode(inventory)
@@ -158,7 +169,7 @@ func SendVersion(addr string, chain *blockchain.BlockChain) {
 	SendData(addr, request)
 }
 
-// sends request to node with address for their blocks on their blockchain
+// sends request to node with address and asks for the blocks on their blockchain
 func SendGetBlocks(address string) {
 	payload := GobEncode(GetBlocks{nodeAddress}) // this client wants to get blocks from node with address
 	request := append(CmdToBytes("getblocks"), payload...)
@@ -166,7 +177,7 @@ func SendGetBlocks(address string) {
 	SendData(address, request)
 }
 
-// sends data (id) to the node with address????
+// sends request to node with address and asks to get the particular data (id). either block or transaction
 // kind can be block or transaction
 func SendGetData(address, kind string, id []byte) {
 	payload := GobEncode(GetData{nodeAddress, kind, id})
@@ -203,6 +214,309 @@ func SendData(addr string, data []byte) {
 	}
 }
 
+// handles receiving the "addr" command from another peer
+// takes in "addr" command as a bunch of bytes
+func HandleAddr(request []byte) {
+	var buff bytes.Buffer
+	var payload Addr
+
+	// decode the request into an Addr struct (payload)
+	// trim the command off the beginning of the bytes
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// add the known nodes to this current node's known nodes
+	KnownNodes = append(KnownNodes, payload.AddrList...)
+	fmt.Printf("there are %d known nodes\n", len(KnownNodes))
+
+	// after updating this client's list of known nodes,
+	// we want to request all of the nodes for the blocks on their blockchain
+	RequestBlocks()
+}
+
+// handles receiving the "inv" command from another peer,
+// where another peer is prompting this client that it need to update it's inventory with a new block or transaction.
+// this client will then request back the full data it needs (block or transaction)
+func HandleInv(request []byte, chain *blockchain.BlockChain) {
+	var buff bytes.Buffer
+	var payload Inv
+
+	// decode the request into an Inv struct (payload)
+	// trim the command off the beginning of the bytes
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// prints the number of inventory type (block or transaction), which should be updated
+	fmt.Printf("Received inventory with %d %s\n", len(payload.Items), payload.Type)
+
+	if payload.Type == "block" {
+		// set blocks in transit (pending delivery to this client, so that we can update our inventory)
+		blocksInTransit = payload.Items
+
+		// get the block hash we need and send a request back in order to get that block
+		blockHash := payload.Items[0]
+		SendGetData(payload.AddrFrom, "block", blockHash)
+
+		// remove the blockhash (of the block requested to be sent back) from transit
+		newInTransit := [][]byte{}
+		for _, b := range blocksInTransit {
+			if bytes.Compare(b, blockHash) != 0 {
+				newInTransit = append(newInTransit, b)
+			}
+		}
+		// update blocks in transit with the blockhash above removed.
+		// its not in transit anymore since the full block has been requested to be sent back
+		blocksInTransit = newInTransit
+	}
+
+	// if the transaction ID does not exist in this client's pool, then request for the full transaction to be sent back
+	if payload.Type == "tx" {
+		txID := payload.Items[0]
+
+		if memoryPool[hex.EncodeToString(txID)].ID == nil {
+			SendGetData(payload.AddrFrom, "tx", txID)
+		}
+	}
+}
+
+// handles receiving the "block" command from another peer,
+// where another peer sends this client a block that has just been mined?
+func HandleBlock(request []byte, chain *blockchain.BlockChain) {
+	var buff bytes.Buffer
+	var payload Block
+
+	// decode the request into a Block struct (payload)
+	// trim the command off the beginning of the bytes
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// convert block bytes into blockchain package's Block Struct
+	blockData := payload.Block
+	block := blockchain.Deserialize(blockData)
+
+	// add the sent block to this clients blockchain
+	fmt.Printf("Received a new block!")
+	chain.AddBlock(block)
+
+	fmt.Printf("Added block %x\n", block.Hash)
+
+	// if there are any blocks currently in transit
+	if len(blocksInTransit) > 0  {
+		// take first block in transit and assign to blockHash
+		blockHash := blocksInTransit[0]
+		// ask the sender of the block that we received, for the data of this block in transit
+		SendGetData(payload.AddrFrom, "block", blockHash)
+
+		// remove the first block from blocksInTransit
+		blocksInTransit = blocksInTransit[1:]
+	} else {
+		// if no more blocks in transit, just reindex the UTXO set since a new block has been added to the chain
+		UTXOSet := blockchain.UTXOSet{chain}
+		UTXOSet.Reindex()
+	}
+}
+
+// handles receiving the "getblocks" command from another peer,
+// where another peer is requesting for this client to send all its blocks on this blockchain
+func HandleGetBlocks(request []byte, chain *blockchain.BlockChain) {
+	var buff bytes.Buffer
+	var payload GetBlocks
+
+	// decode the request into a GetBlocks struct (payload)
+	// trim the command off the beginning of the bytes
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// get all the hashes from this blockchain and send the inventory to the peer who requested it.
+	// this tells the other node they must update their inventory with these block hashes.
+	// the other node will then request back the full data
+	blocks := chain.GetBlockHashes()
+	SendInv(payload.AddrFrom, "block", blocks)
+}
+
+// handles receiving the "getdata" command from another peer,
+// when another peer is requesting for this client to send them either a specific block or transaction
+func HandleGetData(request []byte, chain *blockchain.BlockChain) {
+	var buff bytes.Buffer
+	var payload GetData
+
+	// decode the request into a GetData struct (payload)
+	// trim the command off the beginning of the bytes
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// if the sender is requesting a block from this client, then get the block and send it back to them
+	if payload.Type == "block" {
+		block, err := chain.GetBlock([]byte(payload.ID))
+		if err != nil {
+			return
+		}
+		SendBlock(payload.AddrFrom, &block)
+	}
+
+	// if the sender is requesting a transaction, get it from your memory pool and send it back to them
+	if payload.Type == "tx" {
+		txID := hex.EncodeToString(payload.ID)
+		tx := memoryPool[txID]
+
+		SendTx(payload.AddrFrom, &tx)
+	}
+}
+
+// adds all verified transactions from the memory pool into a block
+// and attempts to mine that block
+func MineTx(chain *blockchain.BlockChain) {
+	var txs []*blockchain.Transaction
+
+	// iterate through all transactions in the memory pool
+	for id := range memoryPool {
+		fmt.Printf("tx: %s\n", memoryPool[id].ID)
+		tx := memoryPool[id]
+		// if transaction is verified, then add it to list
+		if chain.VerifyTransaction(&tx) {
+			txs = append(txs, &tx)
+		}
+	}
+
+	// if no transactions in the pool are verified (inputs come from existing outputs)
+	if len(txs) == 0 {
+		fmt.Println("All transactions are invalid")
+		return
+	}
+
+	// create coinbase transaction which rewards the miner. no inputs and only has output to miner address
+	cbTx := blockchain.CoinbaseTx(minerAddress, "")
+	txs = append(txs, cbTx)
+
+	// mine the block and reindex the UTXOSet on completion
+	newBlock := chain.MineBlock(txs)
+
+	// the above mining should take some time^^
+	UTXOSet := blockchain.UTXOSet{chain}
+	UTXOSet.Reindex()
+
+	fmt.Println("New Block mined")
+
+	// delete all the transactions added to the block from this node's memory pool
+	for _, tx := range txs {
+		txID := hex.EncodeToString(tx.ID)
+		delete(memoryPool, txID)
+	}
+
+	// tell all other nodes that this block has just been mined.
+	// tells other nodes they need to update their inventory with this block hash. the other nodes will then request for the full data (block)
+	for _, node := range KnownNodes {
+		if node != nodeAddress {
+			SendInv(node, "block", [][]byte{newBlock.Hash})
+		}
+	}
+
+	// recursion: keep mining if new transactions were added to the memory pool while the previous block was being mined
+	if len(memoryPool) > 0 {
+		MineTx(chain)
+	}
+}
+
+// handles receiving the "version" command from another peer,
+// when another peer is sending its blockchain version to this client
+func HandleVersion(request []byte, chain *blockchain.BlockChain) {
+	var buff bytes.Buffer
+	var payload Version
+
+	// decode the request into a Version struct (payload)
+	// trim the command off the beginning of the bytes
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// get length of this current chain and compare with other chain
+	bestHeight := chain.GetBestHeight()
+	otherHeight := payload.BestHeight
+
+	// if other chain is longer, request the blocks from that node
+	if bestHeight < otherHeight {
+		SendGetBlocks(payload.AddrFrom)
+	} else if bestHeight > otherHeight {
+		// otherwise if this chain is longer, send its version to the other node.
+		// the other node will then send a request to get this chains block
+		SendVersion(payload.AddrFrom, chain)
+	}
+
+	// add node to list of known nodes, if this node is receiving a message from it for the first time
+	if !NodeIsKnown(payload.AddrFrom) {
+		KnownNodes = append(KnownNodes, payload.AddrFrom)
+	}
+}
+
+// handles receiving the "tx" command from another peer,
+// when another peer is sending a transaction to this client, which we add to our memory pool
+func HandleTx(request []byte, chain *blockchain.BlockChain) {
+	var buff bytes.Buffer
+	var payload Tx
+
+	// decode the request into a Tx struct (payload)
+	// trim the command off the beginning of the bytes
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// deserialize transaction sent to this client
+	txData := payload.Transaction
+	tx := blockchain.DeserializeTransaction(txData)
+	// add that transaction to this nodes memory pool
+	memoryPool[hex.EncodeToString(tx.ID)] = tx
+
+	// print this node's address and length of memory pool
+	fmt.Printf("%s, %d\n", nodeAddress, len(memoryPool))
+
+	// if this node is the main/central node (first one added to list by default)
+	if nodeAddress == KnownNodes[0] {
+		for _, node := range KnownNodes {
+			// send inventory (transaction ID) to all other nodes except for this one and the node which sent this transaction.
+			// this tells other nodes they must update their inventory with this transaction ID. the other nodes will then request back this transaction
+			if node != nodeAddress && node != payload.AddrFrom {
+				SendInv(node, "tx", [][]byte{tx.ID})
+			}
+		}
+	} else {
+		// otherwise if we have miner node (miner address longer than 0), and we have more than 2 transactions in the memory pool, mine new block with these transactions
+		// why do we check if more than 2 transactions??? do we need at least 2 transactions on a block that is mined???
+		if len(memoryPool) > 2 && len(minerAddress) > 0 {
+			MineTx(chain)
+		}
+	}
+}
+
 func HandleConnection(conn net.Conn, chain *blockchain.BlockChain) {
 	req, err := ioutil.ReadAll(conn)
 	defer conn.Close()
@@ -231,6 +545,16 @@ func GobEncode(data interface{}) []byte {
 		log.Panic(err)
 	}
 	return buff.Bytes()
+}
+
+// checks if address belongs to list of known nodes
+func NodeIsKnown(addr string) bool {
+	for _, node := range KnownNodes {
+		if node == addr {
+			return true
+		}
+	}
+	return false
 }
 
 // closes down the database if hitting control-c. intercepts that signal and closes down the DB and quitting app
