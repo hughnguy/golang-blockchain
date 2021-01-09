@@ -34,6 +34,16 @@ func (tx Transaction) Serialize() []byte {
 	return encoded.Bytes()
 }
 
+// deserializes bytes into transaction
+func DeserializeTransaction(data []byte) Transaction {
+	var transaction Transaction
+
+	decoder := gob.NewDecoder(bytes.NewReader(data))
+	err := decoder.Decode(&transaction)
+	Handle(err)
+	return transaction
+}
+
 // creates a hash of the transaction which we can use as a transaction ID
 func (tx *Transaction) Hash() []byte {
 	var hash [32]byte
@@ -66,13 +76,10 @@ func CoinbaseTx(to, data string) *Transaction {
 	return &tx
 }
 
-func NewTransaction(from, to string, amount int, UTXO *UTXOSet) *Transaction {
+func NewTransaction(w *wallet.Wallet, to string, amount int, UTXO *UTXOSet) *Transaction {
 	var inputs []TxInput
 	var outputs []TxOutput
 
-	wallets, err := wallet.CreateWallets()
-	Handle(err)
-	w := wallets.GetWallet(from) // get wallet of the from address
 	// get hash of public key (this is different from address. address also contains version + checksum)
 	pubKeyHash := wallet.PublicKeyHash(w.PublicKey)
 
@@ -97,6 +104,9 @@ func NewTransaction(from, to string, amount int, UTXO *UTXOSet) *Transaction {
 			inputs = append(inputs, input)
 		}
 	}
+
+	// get wallet address
+	from := fmt.Sprintf("%s", w.Address())
 
 	// output here is created for the amount to send. we lock the output with the receiver address
 	// so that only they can use this output for future inputs

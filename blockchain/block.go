@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"encoding/gob"
 	"log"
+	"time"
 )
 
 type Block struct {
+	Timestamp int64
 	Hash []byte // current hash
 	Transactions []*Transaction // transactions on block. needs to have at least 1 transaction. can have many different transactions as well
 	PrevHash []byte // last blocks hash
 	Nonce int
+	Height int
 }
 
 // proof of work algorithm must consider transactions stored in block, instead of just hashing the previous data field
@@ -27,8 +30,8 @@ func (b *Block) HashTransactions() []byte {
 	return tree.RootNode.Data
 }
 
-func CreateBlock(txs []*Transaction, prevHash []byte) *Block {
-	block := &Block{[]byte{}, txs, prevHash, 0} // returns memory address of this block
+func CreateBlock(txs []*Transaction, prevHash []byte, height int) *Block {
+	block := &Block{time.Now().Unix(), []byte{}, txs, prevHash, 0, height} // returns memory address of this block
 
 	pow := NewProof(block) // create proof of work for this block
 	nonce, hash := pow.Run() // try to solve the proof of work here
@@ -40,7 +43,7 @@ func CreateBlock(txs []*Transaction, prevHash []byte) *Block {
 }
 
 func Genesis(coinbase *Transaction) *Block { // first block in blockchain
-	return CreateBlock([]*Transaction{coinbase}, []byte{})
+	return CreateBlock([]*Transaction{coinbase}, []byte{}, 0) // 0 since first block in blockchain
 }
 
 // serialize for database storage

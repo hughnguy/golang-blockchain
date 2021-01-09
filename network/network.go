@@ -186,6 +186,7 @@ func SendGetData(address, kind string, id []byte) {
 	SendData(address, request)
 }
 
+// sends data in bytes to a specific node (address)
 func SendData(addr string, data []byte) {
 	conn, err := net.Dial(protocol, addr) // connect to internet using TCP
 
@@ -214,7 +215,8 @@ func SendData(addr string, data []byte) {
 	}
 }
 
-// handles receiving the "addr" command from another peer
+// handles receiving the "addr" command from another peer,
+// where another peer is sending this client all of it's known nodes (AddrList)
 // takes in "addr" command as a bunch of bytes
 func HandleAddr(request []byte) {
 	var buff bytes.Buffer
@@ -499,7 +501,7 @@ func HandleTx(request []byte, chain *blockchain.BlockChain) {
 	// print this node's address and length of memory pool
 	fmt.Printf("%s, %d\n", nodeAddress, len(memoryPool))
 
-	// if this node is the main/central node (first one added to list by default)
+	// if this node is the main/central node (first one added to list by default: port 3000)
 	if nodeAddress == KnownNodes[0] {
 		for _, node := range KnownNodes {
 			// send inventory (transaction ID) to all other nodes except for this one and the node which sent this transaction.
@@ -509,15 +511,17 @@ func HandleTx(request []byte, chain *blockchain.BlockChain) {
 			}
 		}
 	} else {
-		// otherwise if we have miner node (miner address longer than 0), and we have more than 2 transactions in the memory pool, mine new block with these transactions
+		// otherwise if this is a miner node (miner address longer than 0), and we have more than 2 transactions in the memory pool, mine new block with these transactions
 		// why do we check if more than 2 transactions??? do we need at least 2 transactions on a block that is mined???
 		if len(memoryPool) > 2 && len(minerAddress) > 0 {
 			MineTx(chain)
 		}
+		// if not a main/central node or a miner node then what does the node do???
 	}
 }
 
 func HandleConnection(conn net.Conn, chain *blockchain.BlockChain) {
+	// read connection to see if any data has been sent to this node (address)
 	req, err := ioutil.ReadAll(conn)
 	defer conn.Close()
 
@@ -529,8 +533,55 @@ func HandleConnection(conn net.Conn, chain *blockchain.BlockChain) {
 	fmt.Printf("Received %s command\n", command)
 
 	switch command {
+	case "addr":
+		HandleAddr(req)
+	case "block":
+		HandleBlock(req, chain)
+	case "inv":
+		HandleInv(req, chain)
+	case "getblocks":
+		HandleGetBlocks(req, chain)
+	case "getdata":
+		HandleGetData(req, chain)
+	case "tx":
+		HandleTx(req, chain)
+	case "version":
+		HandleVersion(req, chain)
 	default:
 		fmt.Println("Unknown command")
+	}
+}
+
+func StartServer(nodeID, mineAddress string) { // mineAddress is optional
+	nodeAddress = fmt.Sprintf("localhost:%s", nodeID)
+
+	// optionally make this node a miner (which will send reward to this address)
+	minerAddress = mineAddress
+
+	// start server at port (nodeID)?
+	// A Listener is a generic network listener for stream-oriented protocols.
+	ln, err := net.Listen(protocol, nodeAddress)
+	if err != nil {
+		log.Panic(err)
+	}
+	defer ln.Close()
+
+	chain := blockchain.ContinueBlockChain(nodeID)
+	defer chain.Database.Close()
+	go CloseDB(chain) // goroutine which will listen and close database
+
+	// if this client is not the main/central node, then send this client's blockchain version to the central node
+	if nodeAddress != KnownNodes[0] {
+		SendVersion(KnownNodes[0], chain)
+	}
+
+	// infinite loop which listens to the connection and handles messages sent to this node
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Panic(err)
+		}
+		go HandleConnection(conn, chain) // make it a go routine so it can be async
 	}
 }
 
