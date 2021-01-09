@@ -16,9 +16,6 @@ import (
 
 const (
 	dbPath = "./tmp/blocks_%s"
-)
-
-const (
 	genesisData = "First Transaction from Genesis"
 	lastHashKey = "lh"
 )
@@ -89,8 +86,8 @@ func InitBlockChain(address, nodeId string) *BlockChain { // creates blockchain
 	}
 
 	opts := badger.DefaultOptions
-	opts.Dir = dbPath
-	opts.ValueDir = dbPath
+	opts.Dir = path
+	opts.ValueDir = path
 
 	db, err := openDB(path, opts)
 	Handle(err)
@@ -127,8 +124,8 @@ func ContinueBlockChain(nodeId string) *BlockChain {
 	}
 
 	opts := badger.DefaultOptions
-	opts.Dir = dbPath
-	opts.ValueDir = dbPath
+	opts.Dir = path
+	opts.ValueDir = path
 
 	// opens database and cleans up any corrupt data
 	db, err := openDB(path, opts)

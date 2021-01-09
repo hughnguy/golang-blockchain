@@ -22,7 +22,7 @@ func (cli *CommandLine) printUsage() {
 	fmt.Println(" printchain - Prints the blocks in the chain")
 	// use mine flag if we want to mine the transaction with that node. can use this when we don't have any miners attached to network.
 	// this will allow us to create multiple blocks before having to connect miner node
-	fmt.Println(" send -from FROM -to TO -amount AMOUNT -mine - Send amount of coins. Then -mine flag")
+	fmt.Println(" send -from FROM -to TO -amount AMOUNT -mine - Send amount of coins. Then -mine flag is set, mine off of this node")
 
 	fmt.Println(" createwallet - Creates a new wallet")
 	fmt.Println(" listaddresses - Lists the addresses in our wallet file")
