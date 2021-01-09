@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/elliptic"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -43,8 +44,12 @@ func (ws *Wallets) GetAllAddresses() []string {
 	return addresses
 }
 
-func (ws Wallets) GetWallet(address string) Wallet {
-	return *ws.Wallets[address]
+func (ws Wallets) GetWallet(address string) (*Wallet, error) {
+	if wallet, exists := ws.Wallets[address]; exists {
+		return wallet, nil
+	} else {
+		return nil, errors.New("This node does not own the private key for wallet: " + address)
+	}
 }
 
 func (ws *Wallets) LoadFile(nodeId string) error {

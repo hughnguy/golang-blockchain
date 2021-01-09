@@ -4,8 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"golang-blockchain/blockchain"
-	"golang-blockchain/wallet"
 	"golang-blockchain/network"
+	"golang-blockchain/wallet"
 	"log"
 	"os"
 	"runtime"
@@ -164,10 +164,13 @@ func (cli *CommandLine) send(from, to string, amount int, nodeID string, mineNow
 		log.Panic(err)
 	}
 	// get specific wallet
-	wallet := wallets.GetWallet(from)
+	wallet, err := wallets.GetWallet(from)
+	if err != nil {
+		log.Panic(err)
+	}
 
 	// create transaction
-	tx := blockchain.NewTransaction(&wallet, to, amount, &UTXOSet)
+	tx := blockchain.NewTransaction(wallet, to, amount, &UTXOSet)
 
 	// if we want the sender to mine block as well
 	if mineNow {

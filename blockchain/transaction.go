@@ -90,7 +90,7 @@ func NewTransaction(w *wallet.Wallet, to string, amount int, UTXO *UTXOSet) *Tra
 	// accumulated, validOutputs := chain.FindSpendableOutputs(pubKeyHash, amount)
 
 	if accumulated < amount {
-		log.Panic("Error: not enough funds")
+		log.Panicf("Error: not enough funds. This wallet only contains %d tokens", accumulated)
 	}
 
 	// go through all unspent outputs which can be used as new inputs
@@ -159,21 +159,24 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTxs map[string]Transac
 		// get the public key hash of the input (when it was previously an output)
 		// and assign this to the public key of the new input being created, before hashing the transaction
 		txCopy.Inputs[inId].PubKey = prevTx.Outputs[in.Out].PubKeyHash
-		// hash the transaction to create a generated hash (ID) which will be later signed. when hashing the transaction,
-		// all other inputs should have a nil pubkey except for this current input being iterated
-		txCopy.ID = txCopy.Hash()
-		// clean up the pubkey for the current input so that data is not corrupt
-		// when hashing the transaction on next input iteration
-		txCopy.Inputs[inId].PubKey = nil
 
-		// signs the generated hash (ID), using a private key to generate a signature.
+		// convert the transaction into data which will be later signed. when converting the transaction,
+		// all other inputs should have a nil pubkey except for this current input being iterated
+		dataToSign := fmt.Sprintf("%x\n", txCopy) // base-16 encoding
+
+		// signs the generated data, using a private key to generate a signature.
 		// this signature proves that the new inputs being created are made by you
-		r, s, err := ecdsa.Sign(rand.Reader, &privKey, txCopy.ID)
+		r, s, err := ecdsa.Sign(rand.Reader, &privKey, []byte(dataToSign))
 		Handle(err)
 		signature := append(r.Bytes(), s.Bytes()...)
 
 		// attach signature to this input as proof
 		tx.Inputs[inId].Signature = signature
+
+		// clean up the pubkey for the current input so that data is not corrupt
+		// when converting the transaction (dataToSign) on next input iteration.
+		// the entire txCopy is converted which means previous inputs cannot contain pubkey
+		txCopy.Inputs[inId].PubKey = nil
 	}
 }
 
@@ -201,12 +204,10 @@ func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 		// get the public key hash of the input (when it was previously an output)
 		// and assign this to the public key of the input being verified, before hashing the transaction
 		txCopy.Inputs[inId].PubKey = prevTx.Outputs[in.Out].PubKeyHash
-		// hash the transaction to create a generated hash (ID) which will later be verified. when hashing the transaction,
+
+		// convert the transaction into data which will later be verified. when converting the transaction,
 		// all other inputs should have a nil pubkey except for this current input being iterated
-		txCopy.ID = txCopy.Hash()
-		// clean up the pubkey for the current input so that data is not corrupt
-		// when hashing the transaction on next input iteration
-		txCopy.Inputs[inId].PubKey = nil
+		dataToVerify := fmt.Sprintf("%x\n", txCopy) // base-16 encoding
 
 		// need to unpack all the data we put into the signature and pubkey of transaction input (previous output's public key hash)
 		r := big.Int{}
@@ -214,7 +215,7 @@ func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 		sigLen := len(in.Signature)
 		// unpack the signature used for this input
 		r.SetBytes(in.Signature[:(sigLen/2)])
-		s.SetBytes(in.Signature[:(sigLen/2)])
+		s.SetBytes(in.Signature[(sigLen/2):])
 
 		x := big.Int{}
 		y := big.Int{}
@@ -230,9 +231,12 @@ func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 		// got attached to this current input before hashing the entire transaction),
 		// running verify() here proves that this input was created and signed from the same person
 		// who owned the previous output (before being used in this input)
-		if ecdsa.Verify(&rawPubKey, txCopy.ID, &r, &s) == false {
+		if ecdsa.Verify(&rawPubKey, []byte(dataToVerify), &r, &s) == false {
 			return false
 		}
+		// clean up the pubkey for the current input so that data is not corrupt
+		// when converting the transaction on next input iteration
+		txCopy.Inputs[inId].PubKey = nil
 	}
 	// all inputs are verified therefore transaction is verified
 	return true

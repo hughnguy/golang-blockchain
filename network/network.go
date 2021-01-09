@@ -32,6 +32,7 @@ const (
 	protocol = "tcp"
 	version = 1
 	commandLength = 12
+	minPoolSizeBeforeMining = 2 // number of tx in pool before mining a block
 )
 
 // typically should use some kind of data/memory storage instead of variables like this
@@ -287,6 +288,8 @@ func HandleInv(request []byte, chain *blockchain.BlockChain) {
 
 		if memoryPool[hex.EncodeToString(txID)].ID == nil {
 			SendGetData(payload.AddrFrom, "tx", txID)
+		} else {
+			fmt.Println("Pool already contains tx. Do not add to pool.")
 		}
 	}
 }
@@ -312,7 +315,7 @@ func HandleBlock(request []byte, chain *blockchain.BlockChain) {
 	block := blockchain.Deserialize(blockData)
 
 	// add the sent block to this clients blockchain
-	fmt.Printf("Received a new block!")
+	fmt.Printf("Received a new block! ")
 	chain.AddBlock(block)
 
 	fmt.Printf("Added block %x\n", block.Hash)
@@ -499,7 +502,7 @@ func HandleTx(request []byte, chain *blockchain.BlockChain) {
 	memoryPool[hex.EncodeToString(tx.ID)] = tx
 
 	// print this node's address and length of memory pool
-	fmt.Printf("%s, %d\n", nodeAddress, len(memoryPool))
+	fmt.Printf("%s now contains %d transactions in it's pool\n", nodeAddress, len(memoryPool))
 
 	// if this node is the main/central node (first one added to list by default: port 3000)
 	if nodeAddress == KnownNodes[0] {
@@ -511,9 +514,8 @@ func HandleTx(request []byte, chain *blockchain.BlockChain) {
 			}
 		}
 	} else {
-		// otherwise if this is a miner node (miner address longer than 0), and we have more than 2 transactions in the memory pool, mine new block with these transactions
-		// why do we check if more than 2 transactions??? do we need at least 2 transactions on a block that is mined???
-		if len(memoryPool) > 2 && len(minerAddress) > 0 {
+		// otherwise if this is a miner node (miner address longer than 0), and we have more than a specified # transactions in the memory pool, mine new block with these transactions
+		if len(memoryPool) > minPoolSizeBeforeMining && len(minerAddress) > 0 {
 			MineTx(chain)
 		}
 		// if not a main/central node or a miner node then the client node simply listens and updates its blockchain

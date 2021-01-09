@@ -91,6 +91,7 @@ func InitBlockChain(address, nodeId string) *BlockChain { // creates blockchain
 
 	db, err := openDB(path, opts)
 	Handle(err)
+	log.Println("================== RUNNING DATABASE FOR NODE " + nodeId + " ==================")
 
 	err = db.Update(func(txn *badger.Txn) error {
 		// no blockchain created yet so create genesis block
@@ -130,6 +131,7 @@ func ContinueBlockChain(nodeId string) *BlockChain {
 	// opens database and cleans up any corrupt data
 	db, err := openDB(path, opts)
 	Handle(err)
+	log.Println("================== RUNNING DATABASE FOR NODE " + nodeId + " ==================")
 
 	err = db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(lastHashKey))
