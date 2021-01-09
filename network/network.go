@@ -516,7 +516,7 @@ func HandleTx(request []byte, chain *blockchain.BlockChain) {
 		if len(memoryPool) > 2 && len(minerAddress) > 0 {
 			MineTx(chain)
 		}
-		// if not a main/central node or a miner node then what does the node do???
+		// if not a main/central node or a miner node then the client node simply listens and updates its blockchain
 	}
 }
 

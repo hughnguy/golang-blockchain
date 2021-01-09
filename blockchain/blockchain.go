@@ -251,7 +251,6 @@ func (chain *BlockChain) MineBlock(transactions []*Transaction) *Block {
 	var lastHash []byte
 	var lastHeight int
 
-	// I don't think this is necessary since we already verify all transactions in the MineTx() function that calls MineBlock()
 	for _, tx := range transactions {
 		if chain.VerifyTransaction(tx) != true {
 			log.Panic("Invalid Transaction")
