@@ -7,6 +7,9 @@ import (
 
 // Can use root of merkle tree to quickly verify if a transaction is inside a block
 // Used by light nodes to be able to check if a block contains a transaction without actually downloading the block itself
+
+// To reconstruct a Merkle tree the only information we need is the hash of the sibling of the transaction,
+// and the hash of each sibling up the branch to the root
 type MerkleTree struct {
 	RootNode *MerkleNode
 }
